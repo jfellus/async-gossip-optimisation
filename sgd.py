@@ -11,17 +11,23 @@ test = DataLoader(MNIST(root='data/', train=False), 128)
 train = DataLoader(MNIST(root='data/', train=True, transform=transforms.ToTensor()), 128, shuffle=True)
 
 class Node:
-    def __init__(self, dataset):
+    def __init__(self, id, dataset):
+        self.id = id
         self.model = nn.Linear(28*28, 10)
         self.optimizer = torch.optim.SGD(self.model.parameters(), 0.001)
-        self.data = dataset
         self.i = 0
         self.dataset = dataset
+        self.iterator = iter(self.dataset)
         self.w = 1
         self.S = self.model.weight * self.w
+    
+    def data(self):
+        while True:
+            for x,y in self.dataset:
+                yield x,y
 
     def step(self):
-        x,y = next(self.dataset)
+        x,y = next(self.iterator)
         out = self.model(x.reshape(-1, self.model.in_features))
         loss = F.cross_entropy(out, y)
         loss.backward()
@@ -29,6 +35,7 @@ class Node:
         self.optimizer.zero_grad()
         self.S = self.model.weight * self.w
         self.i += 1
+        print(f'Node {self.id} step {self.i}')
 
     def evaluate(self):
         loss = []
@@ -48,6 +55,8 @@ class Node:
         to.w += alpha*self.w
         self.S *= (1-alpha)
         self.w *= (1-alpha)
+        self.model.weight.data = self.S / self.w
+        print(f"Send {self.id}->{to.id} : w={self.w} to.w={to.w}")
 
 n = 10
 alpha = 0.5
@@ -56,7 +65,7 @@ MU = 0.5
 l,r = divmod(len(train), n)
 
 nodes = [
-    Node(data) for data in random_split(train, [l]*n + [r])
+    Node(i, train) for i, data in enumerate(random_split(train, [l]*n + [r]))
 ]
 
 if n<=10000:
@@ -80,3 +89,9 @@ for i in range(n*n*n):
         nodes[a].send(nodes[b])
     else:
         nodes[random.randint(0,n-1)].step()
+
+    MU = nodes[0].model.weight / n
+    for i in range(1,n):
+        MU += nodes[i].model.weight / n
+    MSE = 0
+    
